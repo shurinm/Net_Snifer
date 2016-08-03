@@ -63,8 +63,65 @@ struct udphdr {
 	u_short	uh_sum;			// контрольная сумма
 };
 
-	// функция обработки udp сообщения
-	void udphdr (const struct pcap_pkthdr* head, const u_char* packet)
+// функция для подсчета контрольной суммы IP пакета
+u_short chsum (u_char *ip, u_short ip_len) 
+{
+	int shsum = 0;
+	u_short fbyte;
+	u_short sbyte;
+
+	for (int i = 0; i < ip_len; i += 2)
+	{
+		if (i == 10)
+			continue;
+		fbyte = ip[i];
+		sbyte = ip[i + 1];
+		shsum += (fbyte<<8)|sbyte;
+	}
+    shsum = shsum + (shsum>>16);
+    shsum = ~shsum;
+    shsum = shsum&0xFFFF;
+    printf("shsum %#x\n", shsum);
+}
+// структура псевдозаголовка для подсчета контрольной суммы
+struct psevdo_header	
+{
+	int 	sours;	// адрес отправителя
+	int 	dest;	// адрес получателя
+	u_char 	zero;	// нулевое поле
+	u_char 	type;	// тип протакола
+	u_short len;	// длина пакета
+};
+
+// функция для подсчета контрольной суммы UDP
+u_short chsum_udp (u_char *udp, u_char *ip)
+{
+	struct psevdo_header 	hdr_psd;	// Псевдозаголовок
+	struct udphdr 			*hdr_udp;
+	struct ip_header 		*hdr_ip;
+
+	hdr_ip = (struct ip_header *)ip;
+	hdr_udp = (struct udphdr *)udp;
+
+	// Формируем псевдозаголовок
+	hdr_psd.sours = hdr_ip->ip_src.s_addr;
+	hdr_psd.dest = hdr_ip->ip_dst.s_addr;
+	hdr_psd.zero = 0;
+	hdr_psd.type = IPPROTO_UDP;
+	hdr_psd.len = hdr_udp->uh_ulen;
+	
+	if (hdr_psd.len %2 == 1)
+	{
+		printf("**************************************\n\n");
+	}
+		else
+		printf("jhbhjbjhb\n");	
+
+
+}
+
+// функция обработки udp сообщения
+void udphdr (const struct pcap_pkthdr* head, const u_char* packet)
 {
 	struct udphdr *udp;
 
@@ -73,9 +130,9 @@ struct udphdr {
     printf("  dport: %d\n", ntohs(udp->uh_dport));			//вывести номер порта получателя
          
 	printf("\tsum: %#x ulen: %d", udp->uh_sum, udp->uh_ulen);
-};
-	// функция обработки tcp сообщения
-	void header_tcp (const struct pcap_pkthdr* head, const u_char* packet)
+}
+// функция обработки tcp сообщения
+void header_tcp (const struct pcap_pkthdr* head, const u_char* packet)
 {
 	struct tcp_header *tsp;
 
@@ -86,23 +143,29 @@ struct udphdr {
 	printf("\tsum: %d win: %d urp: %d\n", tsp->th_win, tsp->th_sum,  
        tsp->th_urp);
 }
-
-	void handle_ip(u_char *args, const struct pcap_pkthdr* head, const u_char* packet) 
+// функция обработки IP сообщения
+void handle_ip(u_char *args, const struct pcap_pkthdr* head, const u_char* packet) 
 {
     struct ip_header *ip;
     ip=(struct ip_header *)(packet+sizeof(struct ether_header));
     printf("IP\tsource: %s", inet_ntoa(ip->ip_src));
     printf("  dest: %s\n", inet_ntoa(ip->ip_dst));
     printf("\ttos: %d len: %d id: %d ttl: %d sum: %#x\n" , ip->ip_tos, ip->ip_len, 
-       ip->ip_id, ip->ip_ttl, ntohs(ip->ip_sum));
-     if(ip->ip_p == 6) header_tcp(head, packet); 
+       	   ip->ip_id, ip->ip_ttl, ntohs(ip->ip_sum));
+    chsum((u_char *)ip, sizeof(struct ip_header));
+     if(ip->ip_p == 6) 
+     	header_tcp(head, packet);	 
+     else if(ip->ip_p == IPPROTO_UDP)
+     	{ 
+     		udphdr(head, packet);
+     		//chsum_udp ((u_char *)ip, (u_char *)udphdr);
+     	}
      	else
-     		if(ip->ip_p == IPPROTO_UDP) udphdr(head, packet);
-     			else
      		printf("\n");
+
 }
 
-	// функция обработки структуры Ethernet
+// функция обработки структуры Ethernet
 u_short handle_ethernet(u_char *args, const struct pcap_pkthdr* head, const u_char* packet)	 
 {
     struct ether_header *eth;
@@ -159,7 +222,7 @@ void callback(u_char *args, const struct pcap_pkthdr *head, const u_char* packet
 		}
 		printf("\n");
 	}
-	printf("*********************************************************************************************************************");
+	printf("*******************************************************************************************************");
 	printf("\n");
 	printf("\n");
 }
