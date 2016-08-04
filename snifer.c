@@ -59,7 +59,7 @@ struct tcp_header{
 struct udphdr {
 	u_short	uh_sport;		// номер порта отправителя
 	u_short	uh_dport;		// номер порта получателя
-	short	uh_ulen;		// длина
+	u_short	uh_ulen;		// длина
 	u_short	uh_sum;			// контрольная сумма
 };
 
@@ -80,8 +80,7 @@ u_short chsum (u_char *ip, u_short ip_len)
 	}
     shsum = shsum + (shsum>>16);
     shsum = ~shsum;
-    shsum = shsum&0xFFFF;
-    printf("shsum %#x\n", shsum);
+    printf("\nshsum %#x\n", shsum);
 }
 // структура псевдозаголовка для подсчета контрольной суммы
 struct psevdo_header	
@@ -99,25 +98,51 @@ u_short chsum_udp (u_char *udp, u_char *ip)
 	struct psevdo_header 	hdr_psd;	// Псевдозаголовок
 	struct udphdr 			*hdr_udp;
 	struct ip_header 		*hdr_ip;
+    u_char *psd;
 
 	hdr_ip = (struct ip_header *)ip;
 	hdr_udp = (struct udphdr *)udp;
-
+    psd = (u_char *)&hdr_psd;
 	// Формируем псевдозаголовок
 	hdr_psd.sours = hdr_ip->ip_src.s_addr;
 	hdr_psd.dest = hdr_ip->ip_dst.s_addr;
 	hdr_psd.zero = 0;
 	hdr_psd.type = IPPROTO_UDP;
 	hdr_psd.len = hdr_udp->uh_ulen;
-	
-	if (hdr_psd.len %2 == 1)
+
+	u_short onebit;	   // первый байт для разворота
+	u_short twebit;	   // второй байт для разворота
+	int chsum; 		   // чексума
+	u_short leng; 	    // длина пакета
+
+    chsum = 0;
+	// считаем контрольную сумму псевдозаголовка
+	for (int i = 0; i < 12; i += 2)
 	{
-		printf("**************************************\n\n");
+		onebit = psd[i];
+        twebit = psd[i + 1];
+        chsum += (onebit<<8)|twebit;
 	}
-		else
-		printf("jhbhjbjhb\n");	
-
-
+	leng = ntohs(hdr_psd.len);
+    if (leng%2 == 1){
+        onebit = udp[leng -1];
+        twebit = 0;
+        chsum += (onebit<<8)|twebit;
+        leng--;
+    }
+   // считаем контрольную сумму всего оставшегося пакета
+    for (int i = 0; i < leng; i += 2){
+         if (i == 6)
+            continue;
+        onebit = udp[i];
+        twebit = udp[i+1];
+        chsum += (onebit<<8)|twebit;
+    }
+    // Приводим к необходимому виду
+    chsum = chsum + (chsum>>16);
+    chsum = ~chsum;
+    printf("\n\nchusum  %#04x\n", (u_short)chsum);
+    
 }
 
 // функция обработки udp сообщения
@@ -127,9 +152,8 @@ void udphdr (const struct pcap_pkthdr* head, const u_char* packet)
 
 	udp=(struct udphdr *)(packet + sizeof(struct ether_header) + sizeof(struct ip_header));
 	printf("UDP\tsport: %d", ntohs(udp->uh_sport));			//вывести номер порта отправителя
-    printf("  dport: %d\n", ntohs(udp->uh_dport));			//вывести номер порта получателя
-         
-	printf("\tsum: %#x ulen: %d", udp->uh_sum, udp->uh_ulen);
+    printf("  dport: %d\n", ntohs(udp->uh_dport));			//вывести номер порта получателя    
+	printf("\tsum: %#x ulen: %d", ntohs(udp->uh_sum), ntohs(udp->uh_ulen));
 }
 // функция обработки tcp сообщения
 void header_tcp (const struct pcap_pkthdr* head, const u_char* packet)
@@ -147,18 +171,22 @@ void header_tcp (const struct pcap_pkthdr* head, const u_char* packet)
 void handle_ip(u_char *args, const struct pcap_pkthdr* head, const u_char* packet) 
 {
     struct ip_header *ip;
+    struct udphdr *udp;
+
+    udp=(struct udphdr *)(packet + sizeof(struct ether_header) + sizeof(struct ip_header));
     ip=(struct ip_header *)(packet+sizeof(struct ether_header));
     printf("IP\tsource: %s", inet_ntoa(ip->ip_src));
     printf("  dest: %s\n", inet_ntoa(ip->ip_dst));
-    printf("\ttos: %d len: %d id: %d ttl: %d sum: %#x\n" , ip->ip_tos, ip->ip_len, 
-       	   ip->ip_id, ip->ip_ttl, ntohs(ip->ip_sum));
+    printf("\ttos: %d len: %d id: %d ttl: %d sum: %#x\n" , ip->ip_tos, ntohs(ip->ip_len), 
+       	   ntohs(ip->ip_id), ip->ip_ttl, ntohs(ip->ip_sum));
     chsum((u_char *)ip, sizeof(struct ip_header));
      if(ip->ip_p == 6) 
      	header_tcp(head, packet);	 
      else if(ip->ip_p == IPPROTO_UDP)
      	{ 
+            printf("\n");
      		udphdr(head, packet);
-     		//chsum_udp ((u_char *)ip, (u_char *)udphdr);
+     		chsum_udp ((u_char *)udp, (u_char *)ip);
      	}
      	else
      		printf("\n");
